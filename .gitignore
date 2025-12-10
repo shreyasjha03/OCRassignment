@@ -16,6 +16,7 @@ ENV/
 output/*
 !output/results_screenshot.png
 !output/results_summary.txt
+!output/*_redacted.jpg
 *.jpg
 *.jpeg
 *.png

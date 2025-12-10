@@ -47,39 +47,43 @@ print("Initializing EasyOCR (this may take a moment on first run)...")
 reader = easyocr.Reader(['en'], gpu=False, verbose=False)
 
 def perform_ocr(image: np.ndarray, use_binary: bool = False):
-    # For handwritten text, don't use paragraph mode initially
-    # It can cause issues with result format
+    # For handwritten text, use more lenient parameters to get more text
     results = reader.readtext(
         image,
         paragraph=False,  # Don't group - get individual detections
-        width_ths=0.7,    # Lower threshold for width
-        height_ths=0.7,   # Lower threshold for height
-        detail=1          # Return detailed results
+        width_ths=0.5,     # Even lower threshold for width (handwritten is variable)
+        height_ths=0.5,    # Even lower threshold for height
+        detail=1,          # Return detailed results
+        allowlist=None,    # Allow all characters
+        blocklist=''       # Don't block any characters
     )
     text_lines = []
     for result in results:
         # Handle both tuple and list formats
         if isinstance(result, (tuple, list)) and len(result) >= 3:
             bbox, text, confidence = result[0], result[1], result[2]
-            # Lower confidence threshold for handwritten text
-            if confidence > 0.15:  # Even lower for handwritten
+            # Very low confidence threshold for handwritten text
+            if confidence > 0.1:  # Very low threshold to capture more text
                 text_lines.append(text)
     
     # Group into lines based on Y-coordinate
     if text_lines:
-        raw_text = ' '.join(text_lines)  # Join with spaces for now
+        raw_text = ' '.join(text_lines)  # Join with spaces
     else:
         raw_text = ''
     return raw_text, results
 
-# Text cleaning
+# Text cleaning - less aggressive for PII detection
 def clean_text(text: str) -> str:
+    # Normalize whitespace but keep structure
     text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r"[^\w\s\.,;:!?\-'\"()\[\]{}@#%&*+=/\\]", '', text)
+    # Don't remove too many characters - keep potential PII patterns
+    # Only remove clearly problematic OCR artifacts
+    text = re.sub(r"[^\w\s\.,;:!?\-'\"()\[\]{}@#%&*+=/\\]", ' ', text)
     text = text.strip()
     return text
 
-# PII Detection
+# PII Detection - Enhanced for fragmented OCR output
 def detect_pii(text: str) -> Dict[str, List[str]]:
     pii = {
         'emails': [],
@@ -92,54 +96,98 @@ def detect_pii(text: str) -> Dict[str, List[str]]:
         'dates_of_birth': []
     }
     
-    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-    pii['emails'] = re.findall(email_pattern, text, re.IGNORECASE)
+    # Normalize text for better matching (remove extra spaces, handle OCR artifacts)
+    normalized_text = re.sub(r'\s+', ' ', text)
     
+    # Email pattern - more flexible
+    email_pattern = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}'
+    pii['emails'] = re.findall(email_pattern, normalized_text, re.IGNORECASE)
+    
+    # Phone numbers - handle fragmented OCR (digits might be separated)
+    # Look for sequences of 10+ digits (allowing spaces/dashes)
+    phone_text = re.sub(r'[^\d\-\(\)\s]', ' ', normalized_text)
     phone_patterns = [
-        r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b',
-        r'\b\(\d{3}\)\s?\d{3}[-.]?\d{4}\b',
-        r'\b\d{10}\b'
+        r'\d{3}[-.\s]?\d{3}[-.\s]?\d{4}',  # 123-456-7890 or 123 456 7890
+        r'\(\d{3}\)\s?\d{3}[-.\s]?\d{4}',  # (123) 456-7890
+        r'\d{10}',  # 1234567890
+        r'\d{3}\s+\d{3}\s+\d{4}',  # 123 456 7890 (with spaces)
     ]
     for pattern in phone_patterns:
-        matches = re.findall(pattern, text)
-        pii['phone_numbers'].extend(matches)
-    pii['phone_numbers'] = list(set(pii['phone_numbers']))
+        matches = re.findall(pattern, phone_text)
+        # Clean up matches
+        cleaned = [re.sub(r'[\s\-\.]', '', m) for m in matches if len(re.sub(r'[\s\-\.\(\)]', '', m)) >= 10]
+        pii['phone_numbers'].extend(cleaned)
+    pii['phone_numbers'] = list(set([p for p in pii['phone_numbers'] if len(p) >= 10]))
     
-    ssn_pattern = r'\b\d{3}-?\d{2}-?\d{4}\b'
-    pii['ssn'] = re.findall(ssn_pattern, text)
+    # SSN - handle with/without dashes and spaces
+    ssn_text = re.sub(r'[^\d\-\s]', ' ', normalized_text)
+    ssn_patterns = [
+        r'\d{3}[- ]?\d{2}[- ]?\d{4}',
+        r'\d{3}\s+\d{2}\s+\d{4}',
+    ]
+    for pattern in ssn_patterns:
+        matches = re.findall(pattern, ssn_text)
+        cleaned = [re.sub(r'[\s\-]', '-', m) for m in matches]
+        pii['ssn'].extend(cleaned)
+    pii['ssn'] = list(set(pii['ssn']))
     
+    # Dates - more flexible patterns
     date_patterns = [
-        r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b',
-        r'\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b',
-        r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b',
+        r'\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}',  # 01/15/2024 or 1/15/24
+        r'\d{4}[/\-]\d{1,2}[/\-]\d{1,2}',  # 2024/01/15
+        r'\d{1,2}\s+[/\-]\s+\d{1,2}\s+[/\-]\s+\d{2,4}',  # With spaces
+        r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4}',
     ]
     for pattern in date_patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
+        matches = re.findall(pattern, normalized_text, re.IGNORECASE)
         pii['dates'].extend(matches)
     pii['dates'] = list(set(pii['dates']))
     
-    dob_keywords = r'\b(?:DOB|Date of Birth|Born|Birth Date)[: ]*([\d/\-]+|[A-Za-z]+\s+\d{1,2},?\s+\d{4})\b'
-    dob_matches = re.findall(dob_keywords, text, re.IGNORECASE)
-    pii['dates_of_birth'] = dob_matches
+    # Date of Birth - look for keywords with dates nearby
+    dob_keywords = r'(?:DOB|Date of Birth|Born|Birth Date|D\.O\.B\.)[: ]*([\d/\-]+|\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})'
+    dob_matches = re.findall(dob_keywords, normalized_text, re.IGNORECASE)
+    pii['dates_of_birth'].extend(dob_matches)
+    # Also look for dates near "DOB" or "Birth"
+    dob_context = r'(?:DOB|Birth)[\s\S]{0,30}?(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})'
+    context_matches = re.findall(dob_context, normalized_text, re.IGNORECASE)
+    pii['dates_of_birth'].extend(context_matches)
+    pii['dates_of_birth'] = list(set(pii['dates_of_birth']))
     
+    # Medical Record Number - more flexible
     mrn_patterns = [
-        r'\bMRN[: ]*([A-Z0-9]{6,12})\b',
-        r'\bMedical Record[: ]*([A-Z0-9]{6,12})\b',
-        r'\bRecord #[: ]*([A-Z0-9]{6,12})\b'
+        r'(?:MRN|Medical Record|Record #)[: ]*([A-Z0-9]{4,15})',
+        r'MRN\s*[:=]?\s*([A-Z0-9]{4,15})',
+        r'Record\s*#?\s*[:=]?\s*([A-Z0-9]{4,15})',
     ]
     for pattern in mrn_patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
+        matches = re.findall(pattern, normalized_text, re.IGNORECASE)
         pii['medical_record_numbers'].extend(matches)
     pii['medical_record_numbers'] = list(set(pii['medical_record_numbers']))
     
-    name_pattern = r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}\b'
-    potential_names = re.findall(name_pattern, text)
-    false_positives = {'Date', 'Time', 'Name', 'Address', 'Phone', 'Email', 'Patient', 'Doctor', 'Clinic', 'Hospital'}
-    pii['names'] = [name for name in potential_names if not any(fp in name for fp in false_positives)]
+    # Names - improved pattern for fragmented OCR
+    # Look for capitalized words that might be names
+    name_pattern = r'\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,}){0,2}\b'
+    potential_names = re.findall(name_pattern, normalized_text)
+    # Filter out common false positives
+    false_positives = {'Date', 'Time', 'Name', 'Address', 'Phone', 'Email', 'Patient', 
+                      'Doctor', 'Clinic', 'Hospital', 'Drug', 'Approved', 'Dose', 'Route',
+                      'Direction', 'Signature', 'Other'}
+    pii['names'] = [name for name in potential_names 
+                    if len(name.split()) >= 2  # At least 2 words
+                    and not any(fp.lower() in name.lower() for fp in false_positives)
+                    and name not in ['Date Time', 'Date Time', 'Other Direction']]
     
-    address_pattern = r'\b\d+\s+[A-Z][a-z]+\s+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Boulevard|Blvd|Court|Ct|Place|Pl)\b'
-    pii['addresses'] = re.findall(address_pattern, text, re.IGNORECASE)
+    # Addresses - more flexible
+    address_patterns = [
+        r'\d+\s+[A-Z][a-z]+\s+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Boulevard|Blvd|Court|Ct|Place|Pl)',
+        r'\d+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+(?:St|Ave|Rd|Dr|Ln|Blvd|Ct|Pl)',
+    ]
+    for pattern in address_patterns:
+        matches = re.findall(pattern, normalized_text, re.IGNORECASE)
+        pii['addresses'].extend(matches)
+    pii['addresses'] = list(set(pii['addresses']))
     
+    # Remove empty categories
     pii = {k: v for k, v in pii.items() if v}
     return pii
 
@@ -159,10 +207,21 @@ def create_redacted_image(image_path: str, ocr_results: List, pii_texts: List[st
 def process_document(image_path: str, create_redaction: bool = True) -> Dict:
     print(f'\nProcessing: {image_path}')
     print('Step 1: Pre-processing image...')
-    processed_img = preprocess_image(image_path, return_binary=False)  # Use grayscale
+    # Try OCR on original image first (often works better for handwritten text)
+    original_img = cv2.imread(image_path)
+    original_gray = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
+    
+    # Also preprocess for comparison
+    processed_img = preprocess_image(image_path, return_binary=False)
     
     print('Step 2: Performing OCR (this may take a moment)...')
-    raw_text, ocr_results = perform_ocr(processed_img, use_binary=False)
+    # Try original image first, fallback to processed if needed
+    raw_text, ocr_results = perform_ocr(original_gray, use_binary=False)
+    
+    # If we didn't get much text, try with processed image
+    if len(raw_text) < 50:
+        print('  Retrying with preprocessed image...')
+        raw_text, ocr_results = perform_ocr(processed_img, use_binary=False)
     
     print('Step 3: Cleaning text...')
     cleaned_text = clean_text(raw_text)
