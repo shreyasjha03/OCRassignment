@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Output files
+output/
+*.jpg
+*.jpeg
+*.png
+!samples/*.jpg
+!samples/*.jpeg
+!samples/*.png
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# EasyOCR models (downloaded automatically)
+*.pth
+*.onnx
+
