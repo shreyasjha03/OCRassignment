@@ -1,0 +1,31 @@
+============================================================
+OCR PII Extraction Pipeline - Results Summary
+============================================================
+
+
+Document 1: Page 30.jpg
+------------------------------------------------------------
+Extracted Text Length: 175 characters
+Text Preview: 9 Iile [ 2 2 le /E 3 2 I { 6 8 1 8 V 3 2 W1 { 8 E 1 [ H 178 1 3 g 2 4 7 1 1 2 3 5 FFV 0 1 1 1 3 1 9 V 9 1 1 IH 6 V e 1 [ 1 8 1 1 1 1 4 1 g 2 8 1 1 1 3 3 1 9 1 3 3  8 1 5 8 3 1...
+
+PII Detected:
+  No PII detected
+
+
+Document 2: Page 35.jpg
+------------------------------------------------------------
+Extracted Text Length: 195 characters
+Text Preview: 6 m ? ? 1 9 2 1 2 V E 8 E 1 Ii 38 8 ak 2 0 F X 8 9 2 7 { # 4 3 J 6 9 4 F} 5 2 HI H 4 8 8 Sm D 1 24 6 9 5 1 LH 0 #03 & L I 4 98 F 4 8 #i HHLU  F 1 8 9 0 2 8 4 } E L 845 R L 0 1 4 8 7 0 1 I 1 J 1 3...
+
+PII Detected:
+  No PII detected
+
+
+Document 3: Page 14.jpg
+------------------------------------------------------------
+Extracted Text Length: 62 characters
+Text Preview: EE) 6 cels 8 50 2 8 IEF 1 1 F2 7 1 He7 k du F 72 8 3 3 3 1 7 1...
+
+PII Detected:
+  No PII detected
+

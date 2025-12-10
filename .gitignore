@@ -13,7 +13,9 @@ ENV/
 .ipynb_checkpoints
 
 # Output files
-output/
+output/*
+!output/results_screenshot.png
+!output/results_summary.txt
 *.jpg
 *.jpeg
 *.png
